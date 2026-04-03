@@ -6,12 +6,7 @@ import TimeSlotCard from '../components/booking/TimeSlotCard'
 import Button from '../components/ui/Button'
 import SectionHeader from '../components/ui/SectionHeader'
 import { useBookingStore } from '../store/bookingStore'
-
-const pickupDates = [
-  { label: 'Today', sublabel: '20 Mar' },
-  { label: 'Tomorrow', sublabel: '21 Mar' },
-  { label: 'Saturday', sublabel: '22 Mar' },
-]
+import { getPickupDates } from '../utils/pickupDates'
 
 const timeSlots = [
   { label: '8:00 AM - 10:00 AM', capacity: 'Best for home pickup', fee: 'Free' },
@@ -21,6 +16,7 @@ const timeSlots = [
 
 function SchedulePage() {
   const navigate = useNavigate()
+  const pickupDates = getPickupDates()
   const pickup = useBookingStore((state) => state.orderFlow.pickup)
   const dropoff = useBookingStore((state) => state.orderFlow.dropoff)
   const returnToPickup = useBookingStore((state) => state.orderFlow.returnToPickup)

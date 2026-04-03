@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --color-brand-50: #eef7ff;
+  --color-brand-100: #d9efff;
+  --color-brand-500: #2b78ff;
+  --color-brand-600: #1c63e3;
+  --color-brand-700: #1547c9;
+  --color-ink-900: #22233f;
+  --color-ink-700: #4c526d;
+  --color-ink-500: #9198ad;
+  --color-line: #edf0f6;
+  --color-surface: #ffffff;
+  --color-surface-soft: #f7f8fc;
+  --color-success-soft: #e9f8ef;
+  --color-success-strong: #1f9d55;
+  --font-sans: 'Manrope', sans-serif;
+  --shadow-card: 0 14px 36px rgba(34, 35, 63, 0.05);
+}
+
+@layer base {
+  * {
+    @apply box-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply m-0 min-w-[320px] bg-[#eceef4] font-sans text-ink-900 antialiased;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+
+  a {
+    @apply text-inherit no-underline;
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply mx-auto flex min-h-screen w-full max-w-107.5 flex-col bg-surface-soft shadow-card;
+  }
+
+  .page-scroll {
+    @apply flex-1 px-5 pb-28 pt-3;
+  }
+
+  .flow-scroll {
+    @apply flex-1 px-5 pb-32 pt-3;
+  }
+
+  .sticky-action {
+    @apply fixed bottom-0 left-1/2 z-40 w-full max-w-107.5 -translate-x-1/2 border-t border-line bg-surface-soft/95 px-5 pb-6 pt-3 backdrop-blur;
+  }
+}

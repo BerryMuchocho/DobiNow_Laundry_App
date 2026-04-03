@@ -18,7 +18,7 @@ function Button({
     <button
       type={type}
       className={[
-        'inline-flex min-h-11 items-center justify-center rounded-2xl px-4 text-[13px] font-extrabold transition-transform active:scale-[0.98]',
+        'inline-flex min-h-11 items-center justify-center rounded-2xl px-4 text-[13px] font-extrabold transition-transform active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none',
         variants[variant],
         fullWidth ? 'w-full' : '',
         className,

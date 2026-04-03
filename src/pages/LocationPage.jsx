@@ -1,359 +1,752 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Home, Briefcase, MapPin, Search, ArrowRight } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Crosshair,
+  LoaderCircle,
+  MapPin,
+  Navigation,
+  Search,
+  Store,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import AvailabilityCard from '../components/location/AvailabilityCard'
+import LocationMapPreview from '../components/location/LocationMapPreview'
+import SavedPlaceCard from '../components/location/SavedPlaceCard'
+import Button from '../components/ui/Button'
+import Card from '../components/ui/Card'
+import Input from '../components/ui/Input'
+import SectionHeader from '../components/ui/SectionHeader'
+import { DOBINOW_LAUNDRY_MART } from '../config/location'
+import { savedPlaces } from '../data/places'
 import { useBookingStore } from '../store/bookingStore'
-import { nearbyAreas, savedPlaces } from '../data/places'
+import {
+  getFeatureAddress,
+  reverseGeocodeMapbox,
+  retrieveMapboxSuggestion,
+  searchMapboxLocations,
+  sortSearchResults,
+} from '../utils/mapboxLocation'
+import { validateServiceArea } from '../utils/serviceArea'
 
-const PLACE_ICONS = {
-  home: Home,
-  work: Briefcase,
-  default: MapPin,
+function createEmptyDraft(existingLocation) {
+  return {
+    address: existingLocation?.address ?? '',
+    lat: existingLocation?.lat ?? null,
+    lng: existingLocation?.lng ?? null,
+    instructions: existingLocation?.instructions ?? '',
+    isConfirmed: existingLocation?.isConfirmed ?? false,
+    source: existingLocation?.source ?? '',
+  }
 }
 
-const NAIROBI_BOUNDS = {
-  west: 36.65,
-  south: -1.45,
-  east: 37.05,
-  north: -1.15,
+function getSuggestionLabel(suggestion) {
+  return suggestion.name || 'Suggested address'
 }
 
-const NAIROBI_CENTER = {
-  lng: 36.8219,
-  lat: -1.2921,
+function getSuggestionAddress(suggestion) {
+  return suggestion.fullAddress || getSuggestionLabel(suggestion)
 }
 
-async function geocodeWithMapbox(query, accessToken) {
-  const params = new URLSearchParams({
-    access_token: accessToken,
-    country: 'KE',
-    language: 'en',
-    limit: '7',
-    // v6 supports street results, which are better for pickup accuracy.
-    types: 'address,street,neighborhood,locality,place',
-    proximity: `${NAIROBI_CENTER.lng},${NAIROBI_CENTER.lat}`,
-  })
-
-  const response = await fetch(
-    `https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(query)}&${params}`
-  )
-
-  if (!response.ok) {
-    let errorMessage = `Mapbox error: ${response.status}`
-
-    try {
-      const errorData = await response.json()
-      errorMessage = errorData.message
-        ? `Mapbox error: ${response.status} - ${errorData.message}`
-        : errorMessage
-    } catch {
-      // We keep the generic status message if the body is not valid JSON.
+function getStepStatus(location, validation) {
+  if (!location.address && typeof location.lat !== 'number') {
+    return {
+      tone: 'idle',
+      message: 'Search, use your current location, or choose DobiNow Laundry Mart.',
     }
-
-    throw new Error(errorMessage)
   }
 
-  const data = await response.json()
-
-  if (data.message) {
-    throw new Error(data.message)
+  if (!location.isConfirmed) {
+    return {
+      tone: 'warning',
+      message: 'Review the pin preview and confirm it before continuing.',
+    }
   }
 
-  return data.features ?? []
+  if (!validation.isEligible) {
+    return {
+      tone: 'danger',
+      message: validation.message,
+    }
+  }
+
+  return {
+    tone: 'success',
+    message: 'Location confirmed and inside the service area.',
+  }
 }
 
-function rankFeature(feature) {
-  const featureType = feature.properties?.feature_type ?? feature.place_type?.[0] ?? ''
+function StatusMessage({ tone, message }) {
+  const styles = {
+    idle: 'bg-slate-100 text-ink-700',
+    warning: 'bg-amber-50 text-amber-700',
+    danger: 'bg-red-50 text-red-600',
+    success: 'bg-emerald-50 text-emerald-700',
+  }
 
-  if (featureType === 'address') return 0
-  if (featureType === 'street') return 1
-  if (featureType === 'neighborhood') return 2
-  if (featureType === 'locality') return 3
-  if (featureType === 'place') return 4
-  return 5
-}
-
-function isBroadPlaceResult(feature) {
-  const featureType = feature.properties?.feature_type ?? feature.place_type?.[0] ?? ''
-  return featureType === 'place'
-}
-
-function getFeatureLabel(feature) {
   return (
-    feature.properties?.name_preferred ||
-    feature.properties?.name ||
-    feature.text ||
-    feature.place_name?.split(',')[0] ||
-    'Selected address'
+    <div className={['rounded-[20px] px-4 py-3 text-sm font-medium', styles[tone] ?? styles.idle].join(' ')}>
+      {message}
+    </div>
   )
 }
 
-function getFeatureAddress(feature) {
+function SectionToggle({ active, title, description, onClick }) {
   return (
-    feature.properties?.full_address ||
-    feature.place_name ||
-    feature.properties?.place_formatted ||
-    getFeatureLabel(feature)
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        'flex-1 rounded-[22px] border px-4 py-3 text-left transition-all',
+        active ? 'border-brand-500 bg-brand-50' : 'border-line bg-white',
+      ].join(' ')}
+    >
+      <p className="text-sm font-extrabold text-ink-900">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-ink-500">{description}</p>
+    </button>
   )
 }
 
-function filterAndSortFeatures(features) {
-  const sortedFeatures = [...features].sort((left, right) => rankFeature(left) - rankFeature(right))
-  const preciseFeatures = sortedFeatures.filter((feature) => !isBroadPlaceResult(feature))
+function LocationSection({
+  type,
+  title,
+  subtitle,
+  draft,
+  searchQuery,
+  onSearchChange,
+  results,
+  isSearching,
+  searchError,
+  actionError,
+  permissionStatus,
+  validation,
+  accessToken,
+  onSelectResult,
+  onUseCurrentLocation,
+  onUseLaundryMart,
+  onSelectSavedPlace,
+  onInstructionsChange,
+  onConfirm,
+}) {
+  const stepStatus = getStepStatus(draft, validation)
+  const savedPlaceOptions = useMemo(() => savedPlaces.slice(0, 3), [])
+  const showPermissionFallback = permissionStatus === 'denied' || Boolean(actionError)
 
-  // We only fall back to broad place results if Mapbox returned nothing more specific.
-  return preciseFeatures.length ? preciseFeatures : sortedFeatures
+  return (
+    <Card className="space-y-4 rounded-[30px] bg-white">
+      <div className="space-y-1">
+        <p className="text-[11px] font-extrabold uppercase tracking-[0.24em] text-brand-600">{title}</p>
+        <h2 className="text-xl font-extrabold text-ink-900">{subtitle}</h2>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Button fullWidth variant="secondary" className="gap-2" onClick={onUseCurrentLocation}>
+          <Navigation size={16} />
+          Use my current location
+        </Button>
+        <Button fullWidth variant="outline" className="gap-2" onClick={onUseLaundryMart}>
+          <Store size={16} />
+          Use DobiNow Laundry Mart
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        <Input
+          icon={Search}
+          value={searchQuery}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={`Search ${type === 'pickup' ? 'pickup' : 'drop-off'} address or landmark`}
+        />
+        <p className="text-xs leading-5 text-ink-500">
+          Search fills the pin preview. We only save this location after you confirm the map pin.
+        </p>
+        {searchError ? <p className="text-xs leading-5 text-red-500">{searchError}</p> : null}
+        {actionError ? <p className="text-xs leading-5 text-red-500">{actionError}</p> : null}
+      </div>
+
+      {results.length || isSearching ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">Search results</p>
+            {isSearching ? (
+              <span className="text-xs font-medium text-ink-500">Updating...</span>
+            ) : null}
+          </div>
+          {results.length ? (
+            results.map((suggestion) => (
+              <button
+                key={suggestion.id}
+                type="button"
+                onClick={() => onSelectResult(suggestion)}
+                className="flex w-full items-start gap-3 rounded-[22px] border border-line bg-slate-50 px-4 py-3 text-left transition-all hover:border-brand-200"
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-brand-600">
+                  <MapPin size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-ink-900">{getSuggestionLabel(suggestion)}</p>
+                  <p className="mt-1 text-xs leading-5 text-ink-500">{getSuggestionAddress(suggestion)}</p>
+                </div>
+              </button>
+            ))
+          ) : (
+            <div className="rounded-[20px] bg-slate-50 px-4 py-4 text-sm text-ink-500">
+              Searching Mapbox...
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      <div className="space-y-3">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">Quick pinned places</p>
+        {savedPlaceOptions.map((place) => (
+          <SavedPlaceCard
+            key={`${type}-${place.id}`}
+            place={place}
+            selected={draft.address === place.address && draft.source === 'manual-pin'}
+            onSelect={() => onSelectSavedPlace(place)}
+          />
+        ))}
+      </div>
+
+      <LocationMapPreview
+        address={draft.address}
+        lat={draft.lat}
+        lng={draft.lng}
+        accessToken={accessToken}
+        source={draft.source}
+      />
+
+      <label className="block space-y-2">
+        <span className="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">
+          Extra location instructions
+        </span>
+        <textarea
+          value={draft.instructions}
+          onChange={(event) => onInstructionsChange(event.target.value)}
+          rows={3}
+          placeholder="Gate color, floor, landmark, or call-on-arrival notes"
+          className="w-full rounded-[22px] border border-line bg-surface-soft px-4 py-3 text-sm text-ink-900 outline-none placeholder:text-ink-500 focus:border-brand-300"
+        />
+      </label>
+
+      <StatusMessage tone={stepStatus.tone} message={stepStatus.message} />
+
+      {validation.distanceKm ? (
+        <p className="text-xs leading-5 text-ink-500">
+          Approximate distance from our service hub: {validation.distanceKm.toFixed(1)} km
+        </p>
+      ) : null}
+
+      {showPermissionFallback ? (
+        <div className="rounded-[22px] bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-bold">Fallback options are ready.</p>
+              <p className="mt-1">
+                Search manually or choose DobiNow Laundry Mart if browser location is unavailable.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!validation.isEligible && draft.address && draft.isConfirmed ? (
+        <div className="rounded-[22px] bg-red-50 px-4 py-4 text-sm leading-6 text-red-600">
+          This pin is outside the current service area. Choose another nearby address or switch to
+          DobiNow Laundry Mart.
+        </div>
+      ) : null}
+
+      <Button
+        fullWidth
+        className="gap-2"
+        onClick={onConfirm}
+        disabled={!draft.address || typeof draft.lat !== 'number' || typeof draft.lng !== 'number'}
+      >
+        {draft.isConfirmed ? <CheckCircle2 size={16} /> : <Crosshair size={16} />}
+        {draft.isConfirmed ? 'Pin confirmed' : 'Confirm this pin'}
+      </Button>
+    </Card>
+  )
 }
 
 function LocationPage() {
   const navigate = useNavigate()
   const rawMapboxAccessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN?.trim()
   const mapboxAccessToken =
-    rawMapboxAccessToken && !rawMapboxAccessToken.includes('your_mapbox_public_token_here')
+    rawMapboxAccessToken && !rawMapboxAccessToken.includes('your_mapbox_access_token_here')
       ? rawMapboxAccessToken
       : ''
 
-  const selectedAddress = useBookingStore((state) => state.selectedAddress)
-  const setSelectedAddress = useBookingStore((state) => state.setSelectedAddress)
+  const orderFlow = useBookingStore((state) => state.orderFlow)
+  const serviceArea = useBookingStore((state) => state.serviceArea)
+  const locationLoading = useBookingStore((state) => state.locationLoading)
+  const locationError = useBookingStore((state) => state.locationError)
+  const locationPermissionStatus = useBookingStore((state) => state.locationPermissionStatus)
+  const saveLocation = useBookingStore((state) => state.saveLocation)
+  const confirmBooking = useBookingStore((state) => state.confirmBooking)
+  const setReturnToPickup = useBookingStore((state) => state.setReturnToPickup)
+  const setLocationLoading = useBookingStore((state) => state.setLocationLoading)
+  const setLocationError = useBookingStore((state) => state.setLocationError)
+  const setLocationPermissionStatus = useBookingStore((state) => state.setLocationPermissionStatus)
 
-  const [activeArea, setActiveArea] = useState(nearbyAreas[0])
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchError, setSearchError] = useState('')
-  const [mapboxResults, setMapboxResults] = useState([])
-  const [isSearching, setIsSearching] = useState(false)
+  const [searchQueryByType, setSearchQueryByType] = useState({
+    pickup: '',
+    dropoff: '',
+  })
+  const [searchResultsByType, setSearchResultsByType] = useState({
+    pickup: [],
+    dropoff: [],
+  })
+  const [draftByType, setDraftByType] = useState({
+    pickup: createEmptyDraft(orderFlow.pickup),
+    dropoff: createEmptyDraft(orderFlow.returnToPickup ? orderFlow.pickup : orderFlow.dropoff),
+  })
+  const isAnyLocationActionLoading =
+    locationLoading.pickup.currentLocation ||
+    locationLoading.pickup.reverseGeocode ||
+    locationLoading.dropoff.currentLocation ||
+    locationLoading.dropoff.reverseGeocode
 
-  const debounceRef = useRef(null)
-  const canContinue = Boolean(selectedAddress?.id)
-
-  const visiblePlaces = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase()
-
-    if (!normalizedQuery) {
-      return savedPlaces
-    }
-
-    return savedPlaces.filter((place) =>
-      `${place.label} ${place.address}`.toLowerCase().includes(normalizedQuery)
-    )
-  }, [searchQuery])
+  const debounceRefs = useRef({
+    pickup: null,
+    dropoff: null,
+  })
+  const activeSearchRequestIds = useRef({
+    pickup: 0,
+    dropoff: 0,
+  })
 
   useEffect(() => {
+    setDraftByType((previous) => ({
+      pickup: orderFlow.pickup.isConfirmed ? createEmptyDraft(orderFlow.pickup) : previous.pickup,
+      dropoff:
+        orderFlow.returnToPickup
+          ? createEmptyDraft(orderFlow.pickup)
+          : orderFlow.dropoff.isConfirmed
+            ? createEmptyDraft(orderFlow.dropoff)
+            : previous.dropoff,
+    }))
+  }, [orderFlow.dropoff, orderFlow.pickup, orderFlow.returnToPickup])
+
+  useEffect(() => {
+    const debounceRefValues = debounceRefs.current
+
     return () => {
-      clearTimeout(debounceRef.current)
+      clearTimeout(debounceRefValues.pickup)
+      clearTimeout(debounceRefValues.dropoff)
     }
   }, [])
 
   useEffect(() => {
-    const query = searchQuery.trim()
+    const locationTypes = orderFlow.returnToPickup ? ['pickup'] : ['pickup', 'dropoff']
 
-    clearTimeout(debounceRef.current)
+    locationTypes.forEach((type) => {
+      const query = searchQueryByType[type].trim()
+      clearTimeout(debounceRefs.current[type])
 
-    if (!mapboxAccessToken || query.length < 3) {
-      setMapboxResults([])
-      setSearchError('')
-      setIsSearching(false)
-      return
-    }
-
-    debounceRef.current = setTimeout(async () => {
-      try {
-        setIsSearching(true)
-        const results = await geocodeWithMapbox(query, mapboxAccessToken)
-        setMapboxResults(filterAndSortFeatures(results))
-        setSearchError('')
-      } catch (error) {
-        setMapboxResults([])
-        setSearchError(
-          error instanceof Error ? error.message : 'Could not load Mapbox suggestions.'
-        )
-      } finally {
-        setIsSearching(false)
+      if (!mapboxAccessToken || query.length < 3) {
+        activeSearchRequestIds.current[type] += 1
+        setSearchResultsByType((previous) => ({
+          ...previous,
+          [type]: [],
+        }))
+        setLocationLoading(type, 'search', false)
+        return
       }
-    }, 300)
-  }, [mapboxAccessToken, searchQuery])
 
-  function handleSelectAddress(place) {
-    setSelectedAddress(place)
-    // We keep the seamless auto-continue flow that is already working well.
-    navigate('/schedule')
+      debounceRefs.current[type] = setTimeout(async () => {
+        const requestId = activeSearchRequestIds.current[type] + 1
+        activeSearchRequestIds.current[type] = requestId
+
+        try {
+          setLocationLoading(type, 'search', true)
+          const { suggestions } = await searchMapboxLocations(query, mapboxAccessToken)
+
+          if (activeSearchRequestIds.current[type] !== requestId) {
+            return
+          }
+
+          setSearchResultsByType((previous) => ({
+            ...previous,
+            [type]: sortSearchResults(suggestions),
+          }))
+          setLocationError(type, 'search', '')
+        } catch (error) {
+          if (activeSearchRequestIds.current[type] !== requestId) {
+            return
+          }
+
+          setSearchResultsByType((previous) => ({
+            ...previous,
+            [type]: [],
+          }))
+          setLocationError(
+            type,
+            'search',
+            error instanceof Error ? error.message : 'Could not load Mapbox suggestions.'
+          )
+        } finally {
+          if (activeSearchRequestIds.current[type] === requestId) {
+            setLocationLoading(type, 'search', false)
+          }
+        }
+      }, 250)
+    })
+  }, [mapboxAccessToken, orderFlow.returnToPickup, searchQueryByType, setLocationError, setLocationLoading])
+
+  const canContinue =
+    orderFlow.pickup.isConfirmed &&
+    serviceArea.pickup.isEligible &&
+    (orderFlow.returnToPickup || (orderFlow.dropoff.isConfirmed && serviceArea.dropoff.isEligible))
+
+  function updateDraft(type, updater) {
+    setDraftByType((previous) => ({
+      ...previous,
+      [type]:
+        typeof updater === 'function'
+          ? updater(previous[type])
+          : {
+              ...previous[type],
+              ...updater,
+            },
+    }))
   }
 
-  function handleSelectFeature(feature) {
-    const coordinates = feature.properties?.coordinates
-    const lng = coordinates?.longitude ?? feature.center?.[0]
-    const lat = coordinates?.latitude ?? feature.center?.[1]
-    const label = getFeatureLabel(feature)
+  function resetSearch(type) {
+    setSearchQueryByType((previous) => ({
+      ...previous,
+      [type]: '',
+    }))
+    setSearchResultsByType((previous) => ({
+      ...previous,
+      [type]: [],
+    }))
+  }
 
-    setMapboxResults([])
-    setSearchQuery('')
-    setSearchError('')
+  function applyPendingLocation(type, nextLocation) {
+    updateDraft(type, {
+      ...nextLocation,
+      isConfirmed: false,
+    })
+    setLocationError(type, 'currentLocation', '')
+    setLocationError(type, 'reverseGeocode', '')
+  }
 
-    handleSelectAddress({
-      id: feature.id,
-      label,
-      address: getFeatureAddress(feature),
-      coordinates:
-        typeof lng === 'number' && typeof lat === 'number'
-          ? { longitude: lng, latitude: lat }
-          : undefined,
-      source: 'mapbox',
+  async function handleSelectResult(type, suggestion) {
+    try {
+      setLocationLoading(type, 'search', true)
+      const retrievedFeature = await retrieveMapboxSuggestion(suggestion, mapboxAccessToken)
+
+      if (!retrievedFeature) {
+        throw new Error('Could not retrieve the selected Search Box result.')
+      }
+
+      applyPendingLocation(type, {
+        address: retrievedFeature.address,
+        lat: retrievedFeature.lat,
+        lng: retrievedFeature.lng,
+        instructions: draftByType[type].instructions,
+        source: 'search',
+      })
+      resetSearch(type)
+    } catch (error) {
+      setLocationError(
+        type,
+        'search',
+        error instanceof Error ? error.message : 'Could not load the selected Search Box result.'
+      )
+    } finally {
+      setLocationLoading(type, 'search', false)
+    }
+  }
+
+  function handleSelectSavedPlace(type, place) {
+    applyPendingLocation(type, {
+      address: place.address,
+      lat: place.lat,
+      lng: place.lng,
+      instructions: draftByType[type].instructions || place.instructions || '',
+      source: 'manual-pin',
     })
   }
 
-  return (
-    <div className="relative mx-auto min-h-screen max-w-sm bg-slate-100">
-      <div className="space-y-6 overflow-y-auto px-5 pb-36 pt-5">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-brand-600">
-            <MapPin size={18} />
-            <span className="text-lg font-bold">DobiNow</span>
-          </div>
-        </header>
+  function handleUseLaundryMart(type) {
+    const nextLocation = {
+      ...DOBINOW_LAUNDRY_MART,
+      instructions: draftByType[type].instructions || DOBINOW_LAUNDRY_MART.instructions,
+      isConfirmed: true,
+    }
 
-        <h1 className="text-3xl font-bold leading-tight text-ink-900">
-          Where should we pick up your{' '}
-          <span className="text-brand-600">laundry?</span>
-        </h1>
+    updateDraft(type, nextLocation)
+    saveLocation(type, nextLocation)
+    resetSearch(type)
+  }
 
-        <div className="space-y-2">
-          <div className="relative">
-            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-400" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={mapboxAccessToken ? 'Search pickup address...' : 'Search area or estate...'}
-              className="w-full rounded-full bg-slate-200 py-3 pl-10 pr-4 text-sm text-ink-500 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            />
-          </div>
+  async function handleUseCurrentLocation(type) {
+    if (!navigator.geolocation) {
+      setLocationPermissionStatus('unsupported')
+      setLocationError(type, 'currentLocation', 'This browser does not support location access.')
+      return
+    }
 
-          {!mapboxAccessToken ? (
-            <p className="text-xs leading-5 text-ink-500">
-              Add `VITE_MAPBOX_ACCESS_TOKEN` in the root `.env` file to enable Mapbox search.
-              Saved places still work right now.
-            </p>
-          ) : (
-            <p className="text-xs leading-5 text-ink-500">
-              Search for a real pickup address, then tap a result to continue to scheduling.
-            </p>
-          )}
+    setLocationLoading(type, 'currentLocation', true)
+    setLocationError(type, 'currentLocation', '')
+    setLocationPermissionStatus('pending')
 
-          {searchError ? <p className="text-xs leading-5 text-red-500">{searchError}</p> : null}
-        </div>
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        try {
+          const nextLocation = {
+            address: 'Current location pin',
+            lat: coords.latitude,
+            lng: coords.longitude,
+            instructions: draftByType[type].instructions,
+            source: 'current-location',
+          }
 
-        {mapboxAccessToken && searchQuery.trim().length >= 3 ? (
-          <section className="space-y-2.5">
-            <p className="text-xs font-bold uppercase tracking-widest text-ink-500">
-              Mapbox address results
-            </p>
-
-            {isSearching ? (
-              <div className="rounded-2xl bg-white p-4 text-sm text-ink-500">Searching...</div>
-            ) : mapboxResults.length ? (
-              mapboxResults.map((feature) => (
-                <button
-                  key={feature.id}
-                  type="button"
-                  onClick={() => handleSelectFeature(feature)}
-                  className="flex w-full items-center gap-3.5 rounded-2xl border border-transparent bg-white p-3.5 text-left transition-all hover:border-brand-200"
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-100">
-                    <MapPin size={20} className="text-brand-600" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink-900">
-                      {getFeatureLabel(feature)}
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-ink-500">{getFeatureAddress(feature)}</p>
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="rounded-2xl bg-white p-4 text-sm text-ink-500">
-                No Mapbox results yet. Try a fuller address like "Fedha Estate Nairobi".
-              </div>
-            )}
-          </section>
-        ) : null}
-
-        <div className="space-y-2.5">
-          <p className="text-xs font-bold uppercase tracking-widest text-ink-500">Nearby Areas</p>
-          <div className="flex flex-wrap gap-2">
-            {nearbyAreas.map((area) => (
-              <button
-                key={area}
-                type="button"
-                onClick={() => setActiveArea(area)}
-                className={[
-                  'rounded-full px-4 py-2 text-sm font-medium transition-all',
-                  activeArea === area
-                    ? 'border border-brand-200 bg-brand-50 text-brand-700'
-                    : 'border border-transparent bg-slate-200 text-ink-700',
-                ].join(' ')}
-              >
-                {area}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <section className="space-y-2.5">
-          <p className="text-xs font-bold uppercase tracking-widest text-ink-500">Saved Places</p>
-
-          {visiblePlaces.map((place) => {
-            const Icon = PLACE_ICONS[place.type] ?? PLACE_ICONS.default
-            const isSelected = selectedAddress?.id === place.id
-
-            return (
-              <button
-                key={place.id}
-                type="button"
-                onClick={() => handleSelectAddress(place)}
-                aria-pressed={isSelected}
-                className={[
-                  'flex w-full items-center gap-3.5 rounded-2xl p-3.5 text-left transition-all',
-                  isSelected
-                    ? 'border-2 border-brand-500 bg-white'
-                    : 'border border-transparent bg-white hover:border-brand-200',
-                ].join(' ')}
-              >
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-100">
-                  <Icon size={20} className="text-brand-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-ink-900">{place.label}</p>
-                  <p className="mt-0.5 text-xs text-ink-500">{place.address}</p>
-                </div>
-              </button>
+          if (mapboxAccessToken) {
+            setLocationLoading(type, 'reverseGeocode', true)
+            const feature = await reverseGeocodeMapbox(
+              coords.latitude,
+              coords.longitude,
+              mapboxAccessToken
             )
-          })}
 
-          {!visiblePlaces.length ? (
-            <div className="rounded-2xl bg-white p-4 text-sm text-ink-500">
-              No saved places match that search.
-            </div>
-          ) : null}
-        </section>
+            if (feature) {
+              nextLocation.address = getFeatureAddress(feature)
+            }
+          }
 
-        <div className="flex items-center gap-2.5 rounded-xl bg-green-500 px-4 py-3">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-white ring-2 ring-white/30" />
-          <p className="text-sm font-semibold text-white">DobiNow is available in your area</p>
+          applyPendingLocation(type, nextLocation)
+          setLocationPermissionStatus('granted')
+          resetSearch(type)
+        } catch (error) {
+          setLocationError(
+            type,
+            'reverseGeocode',
+            error instanceof Error ? error.message : 'Could not read the address for this pin.'
+          )
+          applyPendingLocation(type, {
+            address: 'Current location pin',
+            lat: coords.latitude,
+            lng: coords.longitude,
+            instructions: draftByType[type].instructions,
+            source: 'current-location',
+          })
+        } finally {
+          setLocationLoading(type, 'currentLocation', false)
+          setLocationLoading(type, 'reverseGeocode', false)
+        }
+      },
+      (error) => {
+        setLocationLoading(type, 'currentLocation', false)
+        setLocationPermissionStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'error')
+        setLocationError(
+          type,
+          'currentLocation',
+          error.code === error.PERMISSION_DENIED
+            ? 'Location permission was denied.'
+            : 'We could not read your current location.'
+        )
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  function handleConfirm(type) {
+    const draft = draftByType[type]
+    const validation = validateServiceArea(draft.lat, draft.lng)
+    const nextLocation = {
+      ...draft,
+      isConfirmed: true,
+    }
+
+    updateDraft(type, nextLocation)
+    saveLocation(type, nextLocation)
+
+    if (!validation.isEligible && nextLocation.source !== 'laundry-mart') {
+      setLocationError(
+        type,
+        'currentLocation',
+        'That confirmed pin is outside the service area. Choose another location or use DobiNow Laundry Mart.'
+      )
+      return
+    }
+
+    setLocationError(type, 'currentLocation', '')
+
+    const pickupReady =
+      type === 'pickup'
+        ? validation.isEligible
+        : orderFlow.pickup.isConfirmed && serviceArea.pickup.isEligible
+    const dropoffReady =
+      orderFlow.returnToPickup
+        ? pickupReady
+        : type === 'dropoff'
+          ? validation.isEligible
+          : orderFlow.dropoff.isConfirmed && serviceArea.dropoff.isEligible
+
+    if (pickupReady && dropoffReady) {
+      confirmBooking()
+      navigate('/tracking')
+    }
+  }
+
+  function renderLocationSection(type) {
+    const draft = draftByType[type]
+    const validation = validateServiceArea(draft.lat, draft.lng)
+
+    return (
+      <LocationSection
+        type={type}
+        title={type === 'pickup' ? 'Step 1' : 'Step 2'}
+        subtitle={type === 'pickup' ? 'Set your pickup location' : 'Set your drop-off location'}
+        draft={draft}
+        searchQuery={searchQueryByType[type]}
+        onSearchChange={(value) =>
+          setSearchQueryByType((previous) => ({
+            ...previous,
+            [type]: value,
+          }))
+        }
+        results={searchResultsByType[type]}
+        isSearching={locationLoading[type].search}
+        searchError={locationError[type].search}
+        actionError={[locationError[type].currentLocation, locationError[type].reverseGeocode].filter(Boolean).join(' ')}
+        permissionStatus={locationPermissionStatus}
+        validation={validation}
+        accessToken={mapboxAccessToken}
+        onSelectResult={(feature) => handleSelectResult(type, feature)}
+        onUseCurrentLocation={() => handleUseCurrentLocation(type)}
+        onUseLaundryMart={() => handleUseLaundryMart(type)}
+        onSelectSavedPlace={(place) => handleSelectSavedPlace(type, place)}
+        onInstructionsChange={(instructions) =>
+          updateDraft(type, (previous) => ({
+            ...previous,
+            instructions,
+            isConfirmed: false,
+          }))
+        }
+        onConfirm={() => handleConfirm(type)}
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <header className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-brand-600">
+          <MapPin size={18} />
+          <span className="text-lg font-bold">DobiNow</span>
         </div>
-      </div>
+        {isAnyLocationActionLoading ? (
+          <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-bold text-ink-700">
+            <LoaderCircle size={14} className="animate-spin text-brand-600" />
+            Locating
+          </span>
+        ) : null}
+      </header>
 
-      <div className="absolute bottom-20 left-0 right-0 z-10 px-5">
-        <button
-          type="button"
-          onClick={() => canContinue && navigate('/schedule')}
+      <SectionHeader
+        eyebrow="Booking flow"
+        title="Choose pickup and drop-off locations."
+        subtitle="Confirm the map pin, readable address, and access instructions for each stop before you continue."
+      />
+
+      {!mapboxAccessToken ? (
+        <Card className="rounded-[26px] bg-amber-50 text-amber-800">
+          <p className="text-sm font-bold">Mapbox is not configured.</p>
+          <p className="mt-2 text-sm leading-6">
+            Add `VITE_MAPBOX_ACCESS_TOKEN` to the root `.env` file to enable address search and map previews.
+          </p>
+        </Card>
+      ) : null}
+
+      <AvailabilityCard />
+
+      {renderLocationSection('pickup')}
+
+      <Card className="space-y-4 rounded-[30px] bg-white">
+        <div className="space-y-1">
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.24em] text-brand-600">Drop-off</p>
+          <h2 className="text-xl font-extrabold text-ink-900">Where should we return the clean laundry?</h2>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <SectionToggle
+            active={orderFlow.returnToPickup}
+            title="Return to pickup location"
+            description="Reuse the confirmed pickup pin and instructions."
+            onClick={() => setReturnToPickup(true)}
+          />
+          <SectionToggle
+            active={!orderFlow.returnToPickup}
+            title="Use another drop-off location"
+            description="Choose a different location for delivery."
+            onClick={() => setReturnToPickup(false)}
+          />
+        </div>
+
+        {orderFlow.returnToPickup ? (
+          <div className="rounded-[22px] bg-brand-50 px-4 py-4 text-sm leading-6 text-brand-700">
+            Your drop-off location will reuse the confirmed pickup address, coordinates, and instructions.
+          </div>
+        ) : (
+          renderLocationSection('dropoff')
+        )}
+      </Card>
+
+      {locationPermissionStatus === 'denied' ? (
+        <Card className="rounded-[26px] bg-amber-50">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 text-amber-700" />
+            <div className="text-sm leading-6 text-amber-800">
+              <p className="font-bold">Location permission denied</p>
+              <p className="mt-1">
+                Search manually or switch to DobiNow Laundry Mart. You can still complete the booking without browser location access.
+              </p>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      <div className="sticky-action">
+        <div className="mb-3 space-y-2">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-bold text-ink-500">Pickup</span>
+            <span className="text-right font-bold text-ink-900">
+              {orderFlow.pickup.isConfirmed ? 'Confirmed' : 'Needs confirmation'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-bold text-ink-500">Drop-off</span>
+            <span className="text-right font-bold text-ink-900">
+              {orderFlow.returnToPickup || orderFlow.dropoff.isConfirmed ? 'Confirmed' : 'Needs confirmation'}
+            </span>
+          </div>
+          {!canContinue ? (
+            <p className="text-xs leading-5 text-red-500">
+              Confirm each required pin inside the service area before continuing to scheduling.
+            </p>
+          ) : null}
+        </div>
+        <Button
+          fullWidth
+          onClick={() => {
+            confirmBooking()
+            navigate('/tracking')
+          }}
           disabled={!canContinue}
-          className={[
-            'flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-[15px] font-semibold text-white shadow-lg transition-all',
-            canContinue
-              ? 'bg-brand-600 hover:bg-brand-700 active:scale-[0.98]'
-              : 'cursor-not-allowed bg-brand-300',
-          ].join(' ')}
         >
-          Continue to Services
-          <ArrowRight size={16} />
-        </button>
+          <span className="flex items-center gap-2">
+            Track your order
+            <ArrowRight size={16} />
+          </span>
+        </Button>
       </div>
     </div>
   )

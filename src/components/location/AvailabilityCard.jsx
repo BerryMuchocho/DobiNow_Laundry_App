@@ -1,4 +1,5 @@
 import { Sparkles } from 'lucide-react'
+import { SERVICE_AREA_CONFIG } from '../../config/location'
 import Card from '../ui/Card'
 import StatusBadge from '../ui/StatusBadge'
 
@@ -10,7 +11,7 @@ function AvailabilityCard() {
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">
             Service area
           </p>
-          <h3 className="mt-2 text-lg font-extrabold">Fedha and nearby Embakasi zones</h3>
+          <h3 className="mt-2 text-lg font-extrabold">{SERVICE_AREA_CONFIG.label}</h3>
         </div>
         <StatusBadge tone="success">Open now</StatusBadge>
       </div>

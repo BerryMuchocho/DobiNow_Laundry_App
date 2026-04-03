@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import Button from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import SectionHeader from '../components/ui/SectionHeader'
-import { savedPlaces } from '../data/places'
 import { services } from '../data/services'
 import { useBookingStore } from '../store/bookingStore'
 import { formatCurrency } from '../utils/formatCurrency'
@@ -11,7 +10,9 @@ import { formatCurrency } from '../utils/formatCurrency'
 function CheckoutPage() {
   const navigate = useNavigate()
   // Reading each field separately avoids a new object snapshot on every render.
-  const selectedAddress = useBookingStore((state) => state.selectedAddress)
+  const pickup = useBookingStore((state) => state.orderFlow.pickup)
+  const dropoff = useBookingStore((state) => state.orderFlow.dropoff)
+  const returnToPickup = useBookingStore((state) => state.orderFlow.returnToPickup)
   const selectedDate = useBookingStore((state) => state.selectedDate)
   const selectedDateLabel = useBookingStore((state) => state.selectedDateLabel)
   const selectedTimeSlot = useBookingStore((state) => state.selectedTimeSlot)
@@ -19,15 +20,16 @@ function CheckoutPage() {
   const confirmBooking = useBookingStore((state) => state.confirmBooking)
 
   // These fallbacks prevent the page from crashing if the store is temporarily empty.
-  const safeAddress = selectedAddress ?? savedPlaces[0]
   const safeService = selectedService ?? services[0]
   const safeDate = selectedDate ?? 'Today'
   const safeDateLabel = selectedDateLabel ?? 'Pickup date'
   const safeTimeSlot = selectedTimeSlot ?? 'Choose a time slot'
+  const safePickup = pickup?.isConfirmed ? pickup : null
+  const safeDropoff = returnToPickup ? safePickup : dropoff?.isConfirmed ? dropoff : null
 
   const deliveryFee = 150
   const total = safeService.price + deliveryFee
-  const hasBookingDetails = Boolean(selectedAddress && selectedService)
+  const hasBookingDetails = Boolean(safePickup && safeDropoff && selectedService)
 
   const handleConfirm = () => {
     // In the MVP we store the new mock order locally, then move to tracking.
@@ -87,8 +89,14 @@ function CheckoutPage() {
         <div className="mt-4 space-y-3">
           <div className="flex items-start justify-between gap-3 text-sm">
             <span className="text-ink-500">Address</span>
-            <span className="text-right font-bold text-ink-900">{safeAddress.address}</span>
+            <span className="text-right font-bold text-ink-900">{safePickup?.address ?? 'Not selected'}</span>
           </div>
+          {safePickup?.instructions ? (
+            <div className="flex items-start justify-between gap-3 text-sm">
+              <span className="text-ink-500">Instructions</span>
+              <span className="text-right font-bold text-ink-900">{safePickup.instructions}</span>
+            </div>
+          ) : null}
           <div className="flex items-start justify-between gap-3 text-sm">
             <span className="text-ink-500">Date</span>
             <span className="text-right font-bold text-ink-900">{safeDate}, {safeDateLabel}</span>
@@ -102,19 +110,25 @@ function CheckoutPage() {
 
       <Card className="rounded-[26px] bg-white">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-extrabold text-ink-900">Delivery estimate</h3>
+          <h3 className="text-sm font-extrabold text-ink-900">Drop-off details</h3>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-ink-700">
-            Same day
+            {returnToPickup ? 'Same as pickup' : 'Custom drop-off'}
           </span>
         </div>
         <div className="mt-4 space-y-3">
           <div className="flex items-start justify-between gap-3 text-sm">
+            <span className="text-ink-500">Address</span>
+            <span className="text-right font-bold text-ink-900">{safeDropoff?.address ?? 'Not selected'}</span>
+          </div>
+          {safeDropoff?.instructions ? (
+            <div className="flex items-start justify-between gap-3 text-sm">
+              <span className="text-ink-500">Instructions</span>
+              <span className="text-right font-bold text-ink-900">{safeDropoff.instructions}</span>
+            </div>
+          ) : null}
+          <div className="flex items-start justify-between gap-3 text-sm">
             <span className="text-ink-500">Estimated return</span>
             <span className="text-right font-bold text-ink-900">{safeDate}, 7:30 PM</span>
-          </div>
-          <div className="flex items-start justify-between gap-3 text-sm">
-            <span className="text-ink-500">Courier note</span>
-            <span className="text-right font-bold text-ink-900">Call on arrival</span>
           </div>
         </div>
       </Card>
@@ -156,7 +170,7 @@ function CheckoutPage() {
           <span className="font-bold text-ink-500">Total</span>
           <span className="text-lg font-extrabold text-ink-900">{formatCurrency(total)}</span>
         </div>
-        <Button fullWidth onClick={handleConfirm}>
+        <Button fullWidth onClick={handleConfirm} disabled={!hasBookingDetails}>
           <span className="flex items-center gap-2">
             <Truck size={16} />
             Confirm booking

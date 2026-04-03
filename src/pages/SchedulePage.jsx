@@ -21,12 +21,15 @@ const timeSlots = [
 
 function SchedulePage() {
   const navigate = useNavigate()
-  const selectedAddress = useBookingStore((state) => state.selectedAddress)
+  const pickup = useBookingStore((state) => state.orderFlow.pickup)
+  const dropoff = useBookingStore((state) => state.orderFlow.dropoff)
+  const returnToPickup = useBookingStore((state) => state.orderFlow.returnToPickup)
   const selectedDate = useBookingStore((state) => state.selectedDate)
   const selectedDateLabel = useBookingStore((state) => state.selectedDateLabel)
   const selectedTimeSlot = useBookingStore((state) => state.selectedTimeSlot)
   const setSelectedDate = useBookingStore((state) => state.setSelectedDate)
   const setSelectedTimeSlot = useBookingStore((state) => state.setSelectedTimeSlot)
+  const canContinue = pickup.isConfirmed && (returnToPickup || dropoff.isConfirmed)
 
   return (
     <div className="space-y-6">
@@ -49,7 +52,9 @@ function SchedulePage() {
         subtitle="We will collect from your selected address and keep you updated at every step."
       />
 
-      <AddressSummaryCard address={selectedAddress} />
+      <AddressSummaryCard address={pickup} title="Pickup location" />
+
+      {!returnToPickup ? <AddressSummaryCard address={dropoff} title="Drop-off location" /> : null}
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">
@@ -98,9 +103,14 @@ function SchedulePage() {
             </p>
           </div>
         </div>
-        <Button fullWidth onClick={() => navigate('/services')}>
+        <Button fullWidth onClick={() => navigate('/services')} disabled={!canContinue}>
           Continue to services
         </Button>
+        {!canContinue ? (
+          <p className="mt-3 text-xs leading-5 text-red-500">
+            Confirm both required locations before selecting services.
+          </p>
+        ) : null}
       </div>
     </div>
   )

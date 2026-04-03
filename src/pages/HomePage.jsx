@@ -4,9 +4,11 @@ import ActiveOrderCard from '../components/home/ActiveOrderCard'
 import HeroCard from '../components/home/HeroCard'
 import ServiceMiniCard from '../components/home/ServiceMiniCard'
 import Card from '../components/ui/Card'
+import { useAuthStore } from '../store/authStore'
 
 function HomePage() {
   const navigate = useNavigate()
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
   // These small cards give the home screen quick-entry shortcuts.
   const serviceCards = [
@@ -27,9 +29,13 @@ function HomePage() {
         </div>
 
         <div className="flex justify-self-end">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ffe4d2] text-[#f2a46f] ring-2 ring-white">
+          <button
+            type="button"
+            onClick={() => navigate(isAuthenticated ? '/profile' : '/login')}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ffe4d2] text-[#f2a46f] ring-2 ring-white"
+          >
             <CircleUserRound size={16} />
-          </div>
+          </button>
         </div>
       </header>
 

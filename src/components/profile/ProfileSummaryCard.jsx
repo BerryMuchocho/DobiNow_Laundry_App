@@ -1,16 +1,27 @@
 import { Star } from 'lucide-react'
+import { useAuthStore } from '../../store/authStore'
 import Card from '../ui/Card'
 
 function ProfileSummaryCard() {
+  const authUser = useAuthStore((state) => state.authUser)
+  const initials = authUser?.fullName
+    ?.split(' ')
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+
   return (
     <Card className="rounded-[30px] bg-ink-900 p-5 text-white">
       <div className="flex items-center gap-4">
         <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-white/12 text-xl font-extrabold">
-          DM
+          {initials || 'DM'}
         </div>
         <div>
-          <h3 className="text-lg font-extrabold">Damaris Mwende</h3>
-          <p className="mt-1 text-sm text-white/70">Fedha, Embakasi, Nairobi</p>
+          <h3 className="text-lg font-extrabold">{authUser?.fullName || 'Damaris Mwende'}</h3>
+          <p className="mt-1 text-sm text-white/70">
+            {authUser?.email || authUser?.phone || 'Fedha, Embakasi, Nairobi'}
+          </p>
         </div>
       </div>
 

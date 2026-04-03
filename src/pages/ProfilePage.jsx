@@ -5,9 +5,11 @@ import ProfileSummaryCard from '../components/profile/ProfileSummaryCard'
 import QuickActionCard from '../components/profile/QuickActionCard'
 import RecentOrderCard from '../components/profile/RecentOrderCard'
 import { recentOrders } from '../data/orders'
+import { useAuthStore } from '../store/authStore'
 
 function ProfilePage() {
   const navigate = useNavigate()
+  const logout = useAuthStore((state) => state.logout)
 
   /*
    * Updated to match the design exactly — 4 tiles:
@@ -95,6 +97,10 @@ function ProfilePage() {
         {/* Sign out — centred and red to match the design */}
         <button
           type="button"
+          onClick={() => {
+            logout()
+            navigate('/login')
+          }}
           className="w-full text-center text-base font-bold text-red-500 py-2"
         >
           Sign Out

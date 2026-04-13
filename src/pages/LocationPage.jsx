@@ -1,15 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Crosshair,
-  LoaderCircle,
-  MapPin,
-  Navigation,
-  Search,
-  Store,
-} from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, Crosshair, LoaderCircle, MapPin, Navigation, Search, Store } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import AvailabilityCard from '../components/location/AvailabilityCard'
 import LocationMapPreview from '../components/location/LocationMapPreview'
@@ -22,6 +12,13 @@ import { DOBINOW_LAUNDRY_MART } from '../config/location'
 import { savedPlaces } from '../data/places'
 import { useBookingStore } from '../store/bookingStore'
 import {
+  createGoogleAutocompleteSessionToken,
+  getGoogleFeatureAddress,
+  retrieveGooglePlaceSuggestion,
+  reverseGeocodeGoogle,
+  searchGooglePlaces,
+} from '../utils/googlePlacesLocation'
+import {
   getFeatureAddress,
   reverseGeocodeMapbox,
   retrieveMapboxSuggestion,
@@ -29,6 +26,8 @@ import {
   sortSearchResults,
 } from '../utils/mapboxLocation'
 import { validateServiceArea } from '../utils/serviceArea'
+
+const LAUNDRY_MART_COLLECTION_INSTRUCTIONS = 'Collect from the front desk inside DobiNow Laundry Mart.'
 
 function createEmptyDraft(existingLocation) {
   return {
@@ -49,11 +48,20 @@ function getSuggestionAddress(suggestion) {
   return suggestion.fullAddress || getSuggestionLabel(suggestion)
 }
 
-function getStepStatus(location, validation) {
+function getLaundryMartLabel(type) {
+  return type === 'pickup'
+    ? 'I will drop off at DobiNow Laundry Mart'
+    : 'I will collect from DobiNow Laundry Mart'
+}
+
+function getStepStatus(type, location, validation) {
   if (!location.address && typeof location.lat !== 'number') {
     return {
       tone: 'idle',
-      message: 'Search, use your current location, or choose DobiNow Laundry Mart.',
+      message:
+        type === 'pickup'
+          ? 'Search, use your current location, or choose to drop off at DobiNow Laundry Mart.'
+          : 'Search a return location or choose to collect from DobiNow Laundry Mart.',
     }
   }
 
@@ -121,7 +129,6 @@ function LocationSection({
   actionError,
   permissionStatus,
   validation,
-  accessToken,
   onSelectResult,
   onUseCurrentLocation,
   onUseLaundryMart,
@@ -129,7 +136,7 @@ function LocationSection({
   onInstructionsChange,
   onConfirm,
 }) {
-  const stepStatus = getStepStatus(draft, validation)
+  const stepStatus = getStepStatus(type, draft, validation)
   const savedPlaceOptions = useMemo(() => savedPlaces.slice(0, 3), [])
   const showPermissionFallback = permissionStatus === 'denied' || Boolean(actionError)
 
@@ -147,7 +154,7 @@ function LocationSection({
         </Button>
         <Button fullWidth variant="outline" className="gap-2" onClick={onUseLaundryMart}>
           <Store size={16} />
-          Use DobiNow Laundry Mart
+          {getLaundryMartLabel(type)}
         </Button>
       </div>
 
@@ -192,7 +199,7 @@ function LocationSection({
             ))
           ) : (
             <div className="rounded-[20px] bg-slate-50 px-4 py-4 text-sm text-ink-500">
-              Searching Mapbox...
+              Searching locations...
             </div>
           )}
         </div>
@@ -214,7 +221,6 @@ function LocationSection({
         address={draft.address}
         lat={draft.lat}
         lng={draft.lng}
-        accessToken={accessToken}
         source={draft.source}
       />
 
@@ -246,7 +252,9 @@ function LocationSection({
             <div>
               <p className="font-bold">Fallback options are ready.</p>
               <p className="mt-1">
-                Search manually or choose DobiNow Laundry Mart if browser location is unavailable.
+                {type === 'pickup'
+                  ? 'Search manually or choose to drop off at DobiNow Laundry Mart if browser location is unavailable.'
+                  : 'Search manually or choose to collect from DobiNow Laundry Mart if browser location is unavailable.'}
               </p>
             </div>
           </div>
@@ -255,8 +263,9 @@ function LocationSection({
 
       {!validation.isEligible && draft.address && draft.isConfirmed ? (
         <div className="rounded-[22px] bg-red-50 px-4 py-4 text-sm leading-6 text-red-600">
-          This pin is outside the current service area. Choose another nearby address or switch to
-          DobiNow Laundry Mart.
+          {type === 'pickup'
+            ? 'This pin is outside the current service area. Choose another nearby address or plan to drop off at DobiNow Laundry Mart.'
+            : 'This pin is outside the current service area. Choose another nearby address or collect from DobiNow Laundry Mart.'}
         </div>
       ) : null}
 
@@ -275,11 +284,15 @@ function LocationSection({
 
 function LocationPage() {
   const navigate = useNavigate()
-  const rawMapboxAccessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN?.trim()
+  const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() || ''
+  const rawMapboxAccessToken =
+    import.meta.env.VITE_MAPBOX_ACCESS_TOKEN?.trim() || import.meta.env.VITE_MAPBOX_TOKEN?.trim()
   const mapboxAccessToken =
     rawMapboxAccessToken && !rawMapboxAccessToken.includes('your_mapbox_access_token_here')
       ? rawMapboxAccessToken
       : ''
+  const locationProvider = googleMapsApiKey ? 'google' : mapboxAccessToken ? 'mapbox' : 'none'
+  const isLocationSearchConfigured = locationProvider !== 'none'
 
   const orderFlow = useBookingStore((state) => state.orderFlow)
   const serviceArea = useBookingStore((state) => state.serviceArea)
@@ -287,7 +300,6 @@ function LocationPage() {
   const locationError = useBookingStore((state) => state.locationError)
   const locationPermissionStatus = useBookingStore((state) => state.locationPermissionStatus)
   const saveLocation = useBookingStore((state) => state.saveLocation)
-  const confirmBooking = useBookingStore((state) => state.confirmBooking)
   const setReturnToPickup = useBookingStore((state) => state.setReturnToPickup)
   const setLocationLoading = useBookingStore((state) => state.setLocationLoading)
   const setLocationError = useBookingStore((state) => state.setLocationError)
@@ -319,6 +331,10 @@ function LocationPage() {
     pickup: 0,
     dropoff: 0,
   })
+  const googleSessionTokens = useRef({
+    pickup: null,
+    dropoff: null,
+  })
 
   useEffect(() => {
     setDraftByType((previous) => ({
@@ -348,7 +364,7 @@ function LocationPage() {
       const query = searchQueryByType[type].trim()
       clearTimeout(debounceRefs.current[type])
 
-      if (!mapboxAccessToken || query.length < 3) {
+      if (!isLocationSearchConfigured || query.length < 3) {
         activeSearchRequestIds.current[type] += 1
         setSearchResultsByType((previous) => ({
           ...previous,
@@ -364,7 +380,25 @@ function LocationPage() {
 
         try {
           setLocationLoading(type, 'search', true)
-          const { suggestions } = await searchMapboxLocations(query, mapboxAccessToken)
+          let suggestions = []
+
+          if (locationProvider === 'google') {
+            if (!googleSessionTokens.current[type]) {
+              googleSessionTokens.current[type] = await createGoogleAutocompleteSessionToken(
+                googleMapsApiKey
+              )
+            }
+
+            const response = await searchGooglePlaces(
+              query,
+              googleMapsApiKey,
+              googleSessionTokens.current[type]
+            )
+            suggestions = response.suggestions
+          } else {
+            const response = await searchMapboxLocations(query, mapboxAccessToken)
+            suggestions = response.suggestions
+          }
 
           if (activeSearchRequestIds.current[type] !== requestId) {
             return
@@ -387,7 +421,7 @@ function LocationPage() {
           setLocationError(
             type,
             'search',
-            error instanceof Error ? error.message : 'Could not load Mapbox suggestions.'
+            error instanceof Error ? error.message : 'Could not load location suggestions.'
           )
         } finally {
           if (activeSearchRequestIds.current[type] === requestId) {
@@ -396,7 +430,16 @@ function LocationPage() {
         }
       }, 250)
     })
-  }, [mapboxAccessToken, orderFlow.returnToPickup, searchQueryByType, setLocationError, setLocationLoading])
+  }, [
+    googleMapsApiKey,
+    isLocationSearchConfigured,
+    locationProvider,
+    mapboxAccessToken,
+    orderFlow.returnToPickup,
+    searchQueryByType,
+    setLocationError,
+    setLocationLoading,
+  ])
 
   const canContinue =
     orderFlow.pickup.isConfirmed &&
@@ -425,6 +468,7 @@ function LocationPage() {
       ...previous,
       [type]: [],
     }))
+    googleSessionTokens.current[type] = null
   }
 
   function applyPendingLocation(type, nextLocation) {
@@ -439,10 +483,13 @@ function LocationPage() {
   async function handleSelectResult(type, suggestion) {
     try {
       setLocationLoading(type, 'search', true)
-      const retrievedFeature = await retrieveMapboxSuggestion(suggestion, mapboxAccessToken)
+      const retrievedFeature =
+        locationProvider === 'google'
+          ? await retrieveGooglePlaceSuggestion(suggestion)
+          : await retrieveMapboxSuggestion(suggestion, mapboxAccessToken)
 
       if (!retrievedFeature) {
-        throw new Error('Could not retrieve the selected Search Box result.')
+        throw new Error('Could not retrieve the selected location result.')
       }
 
       applyPendingLocation(type, {
@@ -457,7 +504,7 @@ function LocationPage() {
       setLocationError(
         type,
         'search',
-        error instanceof Error ? error.message : 'Could not load the selected Search Box result.'
+        error instanceof Error ? error.message : 'Could not load the selected location result.'
       )
     } finally {
       setLocationLoading(type, 'search', false)
@@ -477,13 +524,22 @@ function LocationPage() {
   function handleUseLaundryMart(type) {
     const nextLocation = {
       ...DOBINOW_LAUNDRY_MART,
-      instructions: draftByType[type].instructions || DOBINOW_LAUNDRY_MART.instructions,
+      instructions:
+        draftByType[type].instructions ||
+        (type === 'pickup' ? DOBINOW_LAUNDRY_MART.instructions : LAUNDRY_MART_COLLECTION_INSTRUCTIONS),
       isConfirmed: true,
     }
 
     updateDraft(type, nextLocation)
+    if (type === 'dropoff') {
+      setReturnToPickup(false)
+    }
     saveLocation(type, nextLocation)
     resetSearch(type)
+
+    if (type === 'dropoff' && orderFlow.pickup.isConfirmed) {
+      navigate('/schedule')
+    }
   }
 
   async function handleUseCurrentLocation(type) {
@@ -508,7 +564,18 @@ function LocationPage() {
             source: 'current-location',
           }
 
-          if (mapboxAccessToken) {
+          if (locationProvider === 'google') {
+            setLocationLoading(type, 'reverseGeocode', true)
+            const feature = await reverseGeocodeGoogle(
+              coords.latitude,
+              coords.longitude,
+              googleMapsApiKey
+            )
+
+            if (feature) {
+              nextLocation.address = getGoogleFeatureAddress(feature)
+            }
+          } else if (mapboxAccessToken) {
             setLocationLoading(type, 'reverseGeocode', true)
             const feature = await reverseGeocodeMapbox(
               coords.latitude,
@@ -579,20 +646,9 @@ function LocationPage() {
 
     setLocationError(type, 'currentLocation', '')
 
-    const pickupReady =
-      type === 'pickup'
-        ? validation.isEligible
-        : orderFlow.pickup.isConfirmed && serviceArea.pickup.isEligible
-    const dropoffReady =
-      orderFlow.returnToPickup
-        ? pickupReady
-        : type === 'dropoff'
-          ? validation.isEligible
-          : orderFlow.dropoff.isConfirmed && serviceArea.dropoff.isEligible
-
-    if (pickupReady && dropoffReady) {
-      confirmBooking()
-      navigate('/tracking')
+    if (type === 'dropoff' && validation.isEligible) {
+      setReturnToPickup(false)
+      navigate('/schedule')
     }
   }
 
@@ -604,7 +660,7 @@ function LocationPage() {
       <LocationSection
         type={type}
         title={type === 'pickup' ? 'Step 1' : 'Step 2'}
-        subtitle={type === 'pickup' ? 'Set your pickup location' : 'Set your drop-off location'}
+        subtitle={type === 'pickup' ? 'Set your pickup location' : 'Set your return location'}
         draft={draft}
         searchQuery={searchQueryByType[type]}
         onSearchChange={(value) =>
@@ -619,7 +675,6 @@ function LocationPage() {
         actionError={[locationError[type].currentLocation, locationError[type].reverseGeocode].filter(Boolean).join(' ')}
         permissionStatus={locationPermissionStatus}
         validation={validation}
-        accessToken={mapboxAccessToken}
         onSelectResult={(feature) => handleSelectResult(type, feature)}
         onUseCurrentLocation={() => handleUseCurrentLocation(type)}
         onUseLaundryMart={() => handleUseLaundryMart(type)}
@@ -653,15 +708,23 @@ function LocationPage() {
 
       <SectionHeader
         eyebrow="Booking flow"
-        title="Choose pickup and drop-off locations."
-        subtitle="Confirm the map pin, readable address, and access instructions for each stop before you continue."
+        title="Choose your start and return locations."
+        subtitle="Set where the order starts, then choose where the clean laundry should go after cleaning."
       />
 
-      {!mapboxAccessToken ? (
+      {!isLocationSearchConfigured ? (
         <Card className="rounded-[26px] bg-amber-50 text-amber-800">
-          <p className="text-sm font-bold">Mapbox is not configured.</p>
+          <p className="text-sm font-bold">Location search is not configured.</p>
           <p className="mt-2 text-sm leading-6">
-            Add `VITE_MAPBOX_ACCESS_TOKEN` to the root `.env` file to enable address search and map previews.
+            Add `VITE_GOOGLE_MAPS_API_KEY` to enable Google Places search, or keep
+            `VITE_MAPBOX_ACCESS_TOKEN` as a fallback.
+          </p>
+        </Card>
+      ) : locationProvider === 'google' ? (
+        <Card className="rounded-[26px] bg-emerald-50 text-emerald-800">
+          <p className="text-sm font-bold">Google Places search is active.</p>
+          <p className="mt-2 text-sm leading-6">
+            Search suggestions and current-location address lookup are now powered by Google.
           </p>
         </Card>
       ) : null}
@@ -672,28 +735,40 @@ function LocationPage() {
 
       <Card className="space-y-4 rounded-[30px] bg-white">
         <div className="space-y-1">
-          <p className="text-[11px] font-extrabold uppercase tracking-[0.24em] text-brand-600">Drop-off</p>
-          <h2 className="text-xl font-extrabold text-ink-900">Where should we return the clean laundry?</h2>
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.24em] text-brand-600">After cleaning</p>
+          <h2 className="text-xl font-extrabold text-ink-900">Where should the clean laundry go?</h2>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <SectionToggle
             active={orderFlow.returnToPickup}
-            title="Return to pickup location"
-            description="Reuse the confirmed pickup pin and instructions."
-            onClick={() => setReturnToPickup(true)}
+            title={orderFlow.pickup.source === 'laundry-mart' ? 'Collect from DobiNow Laundry Mart' : 'Return to starting location'}
+            description={
+              orderFlow.pickup.source === 'laundry-mart'
+                ? 'Use DobiNow Laundry Mart as the collection point after cleaning.'
+                : 'Send the clean laundry back to the same confirmed address.'
+            }
+            onClick={() => {
+              setReturnToPickup(true)
+
+              if (orderFlow.pickup.isConfirmed && serviceArea.pickup.isEligible) {
+                navigate('/schedule')
+              }
+            }}
           />
           <SectionToggle
             active={!orderFlow.returnToPickup}
-            title="Use another drop-off location"
-            description="Choose a different location for delivery."
+            title="Choose another return point"
+            description="Set a different address for delivery or choose collection at the mart."
             onClick={() => setReturnToPickup(false)}
           />
         </div>
 
         {orderFlow.returnToPickup ? (
           <div className="rounded-[22px] bg-brand-50 px-4 py-4 text-sm leading-6 text-brand-700">
-            Your drop-off location will reuse the confirmed pickup address, coordinates, and instructions.
+            {orderFlow.pickup.source === 'laundry-mart'
+              ? 'Your order will be ready for collection at DobiNow Laundry Mart after cleaning, with no delivery charge.'
+              : 'Your clean laundry will return to the same confirmed starting address after cleaning.'}
           </div>
         ) : (
           renderLocationSection('dropoff')
@@ -707,7 +782,8 @@ function LocationPage() {
             <div className="text-sm leading-6 text-amber-800">
               <p className="font-bold">Location permission denied</p>
               <p className="mt-1">
-                Search manually or switch to DobiNow Laundry Mart. You can still complete the booking without browser location access.
+                Search manually or switch to dropping off at DobiNow Laundry Mart. You can still complete the
+                booking without browser location access.
               </p>
             </div>
           </div>
@@ -717,33 +793,30 @@ function LocationPage() {
       <div className="sticky-action">
         <div className="mb-3 space-y-2">
           <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="font-bold text-ink-500">Pickup</span>
+            <span className="font-bold text-ink-500">Start location</span>
             <span className="text-right font-bold text-ink-900">
               {orderFlow.pickup.isConfirmed ? 'Confirmed' : 'Needs confirmation'}
             </span>
           </div>
           <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="font-bold text-ink-500">Drop-off</span>
+            <span className="font-bold text-ink-500">Return location</span>
             <span className="text-right font-bold text-ink-900">
               {orderFlow.returnToPickup || orderFlow.dropoff.isConfirmed ? 'Confirmed' : 'Needs confirmation'}
             </span>
           </div>
           {!canContinue ? (
             <p className="text-xs leading-5 text-red-500">
-              Confirm each required pin inside the service area before continuing to scheduling.
+              Confirm both the starting location and the return location before continuing to scheduling.
             </p>
           ) : null}
         </div>
         <Button
           fullWidth
-          onClick={() => {
-            confirmBooking()
-            navigate('/tracking')
-          }}
+          onClick={() => navigate('/schedule')}
           disabled={!canContinue}
         >
           <span className="flex items-center gap-2">
-            Track your order
+            Continue to scheduling
             <ArrowRight size={16} />
           </span>
         </Button>

@@ -7,6 +7,8 @@ import { services } from '../data/services'
 import { useBookingStore } from '../store/bookingStore'
 import { formatCurrency } from '../utils/formatCurrency'
 
+const LAUNDRY_MART_COLLECTION_NOTES = 'Collect from the front desk inside DobiNow Laundry Mart.'
+
 function CheckoutPage() {
   const navigate = useNavigate()
   // Reading each field separately avoids a new object snapshot on every render.
@@ -25,9 +27,13 @@ function CheckoutPage() {
   const safeDateLabel = selectedDateLabel ?? 'Pickup date'
   const safeTimeSlot = selectedTimeSlot ?? 'Choose a time slot'
   const safePickup = pickup?.isConfirmed ? pickup : null
+  const isSelfDropoffOrder = safePickup?.source === 'laundry-mart'
   const safeDropoff = returnToPickup ? safePickup : dropoff?.isConfirmed ? dropoff : null
+  const hasDeliveryService = safeDropoff?.source !== 'laundry-mart'
+  const dropoffNotes =
+    safeDropoff?.source === 'laundry-mart' ? LAUNDRY_MART_COLLECTION_NOTES : safeDropoff?.instructions
 
-  const deliveryFee = 150
+  const deliveryFee = hasDeliveryService ? 150 : 0
   const total = safeService.price + deliveryFee
   const hasBookingDetails = Boolean(safePickup && safeDropoff && selectedService)
 
@@ -39,7 +45,10 @@ function CheckoutPage() {
 
   const priceRows = [
     { label: safeService.title, value: safeService.priceLabel },
-    { label: 'Pickup & delivery', value: formatCurrency(deliveryFee) },
+    {
+      label: hasDeliveryService ? 'Pickup & delivery' : 'Collection after cleaning',
+      value: hasDeliveryService ? formatCurrency(deliveryFee) : 'No delivery charge',
+    },
     { label: 'Total', value: formatCurrency(total) },
   ]
 
@@ -61,7 +70,11 @@ function CheckoutPage() {
 
       <SectionHeader
         title="Review your order."
-        subtitle="Check your service, pickup timing, and payment details before confirming."
+        subtitle={
+          isSelfDropoffOrder
+            ? 'Check your service, laundry drop-off details, and how you want to receive the clean laundry.'
+            : 'Check your service, pickup timing, and payment details before confirming.'
+        }
       />
 
       {!hasBookingDetails ? (
@@ -69,7 +82,7 @@ function CheckoutPage() {
           {/* This message is safer than letting the screen fail silently. */}
           <h2 className="text-base font-extrabold text-ink-900">Booking details are missing.</h2>
           <p className="mt-2 text-sm leading-6 text-ink-500">
-            Please go back and choose your pickup details again before checkout.
+            Please go back and choose your {isSelfDropoffOrder ? 'drop-off' : 'pickup'} details again before checkout.
           </p>
           <Button fullWidth className="mt-4" onClick={() => navigate('/services')}>
             Return to service selection
@@ -85,24 +98,26 @@ function CheckoutPage() {
       </Card>
 
       <Card className="rounded-[26px] bg-white">
-        <h3 className="text-sm font-extrabold text-ink-900">Pickup details</h3>
+        <h3 className="text-sm font-extrabold text-ink-900">
+          {isSelfDropoffOrder ? 'Laundry drop-off details' : 'Pickup details'}
+        </h3>
         <div className="mt-4 space-y-3">
           <div className="flex items-start justify-between gap-3 text-sm">
-            <span className="text-ink-500">Address</span>
+            <span className="text-ink-500">{isSelfDropoffOrder ? 'Drop-off location' : 'Address'}</span>
             <span className="text-right font-bold text-ink-900">{safePickup?.address ?? 'Not selected'}</span>
           </div>
           {safePickup?.instructions ? (
             <div className="flex items-start justify-between gap-3 text-sm">
-              <span className="text-ink-500">Instructions</span>
+              <span className="text-ink-500">{isSelfDropoffOrder ? 'Drop-off notes' : 'Instructions'}</span>
               <span className="text-right font-bold text-ink-900">{safePickup.instructions}</span>
             </div>
           ) : null}
           <div className="flex items-start justify-between gap-3 text-sm">
-            <span className="text-ink-500">Date</span>
+            <span className="text-ink-500">{isSelfDropoffOrder ? 'Planned drop-off date' : 'Date'}</span>
             <span className="text-right font-bold text-ink-900">{safeDate}, {safeDateLabel}</span>
           </div>
           <div className="flex items-start justify-between gap-3 text-sm">
-            <span className="text-ink-500">Time slot</span>
+            <span className="text-ink-500">{isSelfDropoffOrder ? 'Planned drop-off window' : 'Time slot'}</span>
             <span className="text-right font-bold text-ink-900">{safeTimeSlot}</span>
           </div>
         </div>
@@ -110,25 +125,43 @@ function CheckoutPage() {
 
       <Card className="rounded-[26px] bg-white">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-extrabold text-ink-900">Drop-off details</h3>
+          <h3 className="text-sm font-extrabold text-ink-900">
+            {isSelfDropoffOrder ? 'After cleaning' : 'Drop-off details'}
+          </h3>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-ink-700">
-            {returnToPickup ? 'Same as pickup' : 'Custom drop-off'}
+            {isSelfDropoffOrder
+              ? safeDropoff?.source === 'laundry-mart'
+                ? 'Self collection'
+                : 'Delivery selected'
+              : returnToPickup
+                ? safeDropoff?.source === 'laundry-mart'
+                  ? 'Self collection'
+                  : 'Same as pickup'
+                : 'Custom drop-off'}
           </span>
         </div>
         <div className="mt-4 space-y-3">
           <div className="flex items-start justify-between gap-3 text-sm">
-            <span className="text-ink-500">Address</span>
+            <span className="text-ink-500">
+              {safeDropoff?.source === 'laundry-mart' ? 'Collection point' : 'Address'}
+            </span>
             <span className="text-right font-bold text-ink-900">{safeDropoff?.address ?? 'Not selected'}</span>
           </div>
-          {safeDropoff?.instructions ? (
+          {dropoffNotes ? (
             <div className="flex items-start justify-between gap-3 text-sm">
-              <span className="text-ink-500">Instructions</span>
-              <span className="text-right font-bold text-ink-900">{safeDropoff.instructions}</span>
+              <span className="text-ink-500">
+                {safeDropoff?.source === 'laundry-mart' ? 'Collection notes' : 'Instructions'}
+              </span>
+              <span className="text-right font-bold text-ink-900">{dropoffNotes}</span>
             </div>
           ) : null}
           <div className="flex items-start justify-between gap-3 text-sm">
-            <span className="text-ink-500">Estimated return</span>
-            <span className="text-right font-bold text-ink-900">{safeDate}, 7:30 PM</span>
+            <span className="text-ink-500">
+              {safeDropoff?.source === 'laundry-mart' ? 'Ready by' : 'Estimated return'}
+            </span>
+            <span className="text-right font-bold text-ink-900">
+              {safeDropoff?.source === 'laundry-mart' ? 'We will notify you' : `${safeDate}, 7:30 PM`}
+            </span>
           </div>
         </div>
       </Card>

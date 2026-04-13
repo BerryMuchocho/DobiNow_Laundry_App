@@ -1,32 +1,23 @@
 import { MapPin, MoveDiagonal, Navigation } from 'lucide-react'
 import Card from '../ui/Card'
-import { createStaticMapUrl } from '../../utils/mapboxLocation'
 
 function formatCoordinate(value) {
   return typeof value === 'number' ? value.toFixed(5) : '--'
 }
 
-function LocationMapPreview({ address, lat, lng, accessToken, source }) {
-  const mapPreviewUrl = createStaticMapUrl(lat, lng, accessToken)
-
+function LocationMapPreview({ address, lat, lng, source }) {
   return (
     <Card className="overflow-hidden rounded-[26px] bg-white p-0">
-      <div className="relative h-44 bg-slate-100">
-        {mapPreviewUrl ? (
-          <img src={mapPreviewUrl} alt={address || 'Selected map pin'} className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(43,120,255,0.16),_transparent_55%),linear-gradient(135deg,_#f8fbff,_#eef2f8)]">
-            <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-ink-700 shadow-[0_8px_24px_rgba(34,35,63,0.08)]">
-              <MoveDiagonal size={16} className="text-brand-600" />
-              Map preview unlocks with Mapbox
-            </div>
-          </div>
-        )}
-
+      <div className="relative flex h-44 items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(43,120,255,0.16),_transparent_55%),linear-gradient(135deg,_#f8fbff,_#eef2f8)]">
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-brand-600 shadow-[0_10px_30px_rgba(34,35,63,0.18)]">
             <MapPin size={22} />
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-ink-700 shadow-[0_8px_24px_rgba(34,35,63,0.08)]">
+          <MoveDiagonal size={16} className="text-brand-600" />
+          Pin preview
         </div>
       </div>
 

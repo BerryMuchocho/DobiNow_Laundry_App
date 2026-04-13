@@ -53,6 +53,19 @@ function findServiceById(serviceId) {
   return services.find((service) => service.id === serviceId) ?? services[0]
 }
 
+function isSelfDropoffOrder(orderFlow) {
+  return orderFlow.pickup?.source === 'laundry-mart'
+}
+
+function hasDeliveryService(orderFlow) {
+  const finalDropoff = orderFlow.returnToPickup ? orderFlow.pickup : orderFlow.dropoff
+  return finalDropoff?.source !== 'laundry-mart'
+}
+
+function getDeliveryFee(orderFlow) {
+  return hasDeliveryService(orderFlow) ? 150 : 0
+}
+
 const initialPickup = createLocationFromSavedPlace(savedPlaces[0])
 const initialDropoff = initialPickup
 const initialValidation = createServiceAreaState(initialPickup)
@@ -177,48 +190,94 @@ function createBookingState(set, get) {
       const { orderFlow, selectedDate, selectedDateLabel, selectedTimeSlot, selectedService } = get()
       const pickup = orderFlow.pickup
       const dropoff = orderFlow.returnToPickup ? orderFlow.pickup : orderFlow.dropoff
-      const total = selectedService.price + 150
+      const selfDropoffOrder = isSelfDropoffOrder(orderFlow)
+      const deliveryService = hasDeliveryService(orderFlow)
+      const deliveryFee = getDeliveryFee(orderFlow)
+      const total = selectedService.price + deliveryFee
 
       set({
         currentOrder: {
           id: 'DBN-240401',
           serviceTitle: selectedService.title,
-          status: 'Driver assigned',
-          eta: `Pickup ${selectedDate.toLowerCase()} in 18 min`,
+          status: selfDropoffOrder ? 'Awaiting drop-off' : 'Driver assigned',
+          eta: selfDropoffOrder ? `${selectedDate}, ${selectedTimeSlot}` : `Pickup ${selectedDate.toLowerCase()} in 18 min`,
           addressLabel:
-            pickup.source === 'laundry-mart' ? 'DobiNow Laundry Mart' : 'Pickup location',
+            pickup.source === 'laundry-mart' ? 'Laundry drop-off' : 'Pickup location',
           addressLine: pickup.address,
           riderName: 'Kevin Otieno',
           riderPhone: '+254 712 884 221',
-          deliveryEstimate: `${selectedDate}, 7:30 PM`,
+          deliveryEstimate: !deliveryService
+            ? 'Collect from DobiNow Laundry Mart'
+            : `${selectedDate}, 7:30 PM`,
           total,
           totalLabel: formatCurrency(total),
-          timeline: [
-            {
-              title: 'Booking confirmed',
-              time: `${selectedDate} - ${selectedDateLabel}`,
-              detail: `${selectedService.title} is scheduled for ${selectedTimeSlot}.`,
-              done: true,
-            },
-            {
-              title: 'Driver assigned',
-              time: 'Just now',
-              detail: `Pickup confirmed for ${pickup.address}.`,
-              done: true,
-            },
-            {
-              title: 'Laundry in cleaning',
-              time: 'Expected after pickup',
-              detail: 'Your order will move to the cleaning hub after collection.',
-              done: false,
-            },
-            {
-              title: 'Out for delivery',
-              time: 'Expected later today',
-              detail: `Drop-off is set for ${dropoff.address}.`,
-              done: false,
-            },
-          ],
+          timeline: selfDropoffOrder
+            ? [
+                {
+                  title: 'Booking confirmed',
+                  time: `${selectedDate} - ${selectedDateLabel}`,
+                  detail: `${selectedService.title} is scheduled for ${selectedTimeSlot}.`,
+                  done: true,
+                },
+                {
+                  title: 'Drop off at DobiNow Laundry Mart',
+                  time: `${selectedDate}, ${selectedTimeSlot}`,
+                  detail: `Bring your laundry to ${pickup.address}.`,
+                  done: false,
+                },
+                {
+                  title: 'Laundry in cleaning',
+                  time: 'After drop-off',
+                  detail: 'We will start cleaning once your laundry is received at the mart.',
+                  done: false,
+                },
+                deliveryService
+                  ? {
+                      title: 'Out for delivery',
+                      time: 'After cleaning',
+                      detail: `Delivery is set for ${dropoff.address}.`,
+                      done: false,
+                    }
+                  : {
+                      title: 'Ready for collection',
+                      time: 'After cleaning',
+                      detail: 'We will notify you when your order is ready for collection at DobiNow Laundry Mart.',
+                      done: false,
+                    },
+              ]
+            : [
+                {
+                  title: 'Booking confirmed',
+                  time: `${selectedDate} - ${selectedDateLabel}`,
+                  detail: `${selectedService.title} is scheduled for ${selectedTimeSlot}.`,
+                  done: true,
+                },
+                {
+                  title: 'Driver assigned',
+                  time: 'Just now',
+                  detail: `Pickup confirmed for ${pickup.address}.`,
+                  done: true,
+                },
+                {
+                  title: 'Laundry in cleaning',
+                  time: 'Expected after pickup',
+                  detail: 'Your order will move to the cleaning hub after collection.',
+                  done: false,
+                },
+                deliveryService
+                  ? {
+                      title: 'Out for delivery',
+                      time: 'Expected later today',
+                      detail: `Drop-off is set for ${dropoff.address}.`,
+                      done: false,
+                    }
+                  : {
+                      title: 'Ready for collection',
+                      time: 'After cleaning',
+                      detail: 'We will notify you when your order is ready for collection at DobiNow Laundry Mart.',
+                      done: false,
+                    },
+              ],
         },
       })
     },

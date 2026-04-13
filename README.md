@@ -14,3 +14,9 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+## DobiNow location search
+
+The booking flow now prefers Google Places when `VITE_GOOGLE_MAPS_API_KEY` is present.
+
+If the Google key is missing, the app falls back to the existing Mapbox-based search when `VITE_MAPBOX_ACCESS_TOKEN` is configured.

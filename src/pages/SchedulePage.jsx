@@ -25,7 +25,25 @@ function SchedulePage() {
   const selectedTimeSlot = useBookingStore((state) => state.selectedTimeSlot)
   const setSelectedDate = useBookingStore((state) => state.setSelectedDate)
   const setSelectedTimeSlot = useBookingStore((state) => state.setSelectedTimeSlot)
+  const isSelfDropoffOrder = pickup.source === 'laundry-mart'
   const canContinue = pickup.isConfirmed && (returnToPickup || dropoff.isConfirmed)
+  const scheduleTitle = isSelfDropoffOrder ? 'Choose your drop-off window.' : 'Choose your pickup time.'
+  const scheduleSubtitle = isSelfDropoffOrder
+    ? 'Pick the window when you plan to bring your laundry to DobiNow Laundry Mart.'
+    : 'We will collect from your selected address and keep you updated at every step.'
+  const summaryLabel = isSelfDropoffOrder ? 'Selected drop-off window' : 'Selected pickup'
+  const locationTitle = isSelfDropoffOrder ? 'Laundry drop-off point' : 'Pickup location'
+  const slotOptions = isSelfDropoffOrder
+    ? timeSlots.map((slot, index) => ({
+        ...slot,
+        capacity:
+          index === 0
+            ? 'Best for early mart drop-off'
+            : index === 1
+              ? 'Midday mart drop-off window'
+              : 'Afternoon mart drop-off window',
+      }))
+    : timeSlots
 
   return (
     <div className="space-y-6">
@@ -43,14 +61,11 @@ function SchedulePage() {
         </div>
       </header>
 
-      <SectionHeader
-        title="Choose your pickup time."
-        subtitle="We will collect from your selected address and keep you updated at every step."
-      />
+      <SectionHeader title={scheduleTitle} subtitle={scheduleSubtitle} />
 
-      <AddressSummaryCard address={pickup} title="Pickup location" />
+      <AddressSummaryCard address={pickup} title={locationTitle} />
 
-      {!returnToPickup ? <AddressSummaryCard address={dropoff} title="Drop-off location" /> : null}
+      {!returnToPickup ? <AddressSummaryCard address={dropoff} title="Return location" /> : null}
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">
@@ -77,7 +92,7 @@ function SchedulePage() {
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">
           Available slots
         </p>
-        {timeSlots.map((slot) => (
+        {slotOptions.map((slot) => (
           <TimeSlotCard
             key={slot.label}
             slot={slot}
@@ -88,14 +103,13 @@ function SchedulePage() {
       </section>
 
       <div className="sticky-action">
-        {/* The sticky footer mirrors the focused booking summary pattern from mobile apps. */}
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">
-              Selected pickup
+              {summaryLabel}
             </p>
             <p className="mt-1 text-sm font-extrabold text-ink-900">
-              {selectedDate}, {selectedDateLabel} • {selectedTimeSlot}
+              {selectedDate}, {selectedDateLabel} | {selectedTimeSlot}
             </p>
           </div>
         </div>
@@ -104,7 +118,7 @@ function SchedulePage() {
         </Button>
         {!canContinue ? (
           <p className="mt-3 text-xs leading-5 text-red-500">
-            Confirm both required locations before selecting services.
+            Confirm both the starting location and the return location before selecting services.
           </p>
         ) : null}
       </div>

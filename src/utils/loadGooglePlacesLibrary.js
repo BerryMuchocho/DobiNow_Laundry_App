@@ -1,19 +1,19 @@
-let googlePlacesPromise
+let googleMapsScriptPromise
 
-export function loadGooglePlacesLibrary(apiKey) {
+function ensureGoogleMapsScript(apiKey) {
   if (!apiKey) {
     return Promise.reject(new Error('Missing VITE_GOOGLE_MAPS_API_KEY.'))
   }
 
   if (window.google?.maps?.importLibrary) {
-    return window.google.maps.importLibrary('places')
+    return Promise.resolve(window.google.maps)
   }
 
-  if (googlePlacesPromise) {
-    return googlePlacesPromise
+  if (googleMapsScriptPromise) {
+    return googleMapsScriptPromise
   }
 
-  googlePlacesPromise = new Promise((resolve, reject) => {
+  googleMapsScriptPromise = new Promise((resolve, reject) => {
     const callbackName = '__dobiNowGoogleMapsInit'
     const existingScript = document.querySelector('script[data-google-maps-loader="true"]')
 
@@ -43,10 +43,7 @@ export function loadGooglePlacesLibrary(apiKey) {
 
     function handleLoad() {
       delete window[callbackName]
-      window.google.maps
-        .importLibrary('places')
-        .then(resolve)
-        .catch(reject)
+      resolve(window.google.maps)
     }
 
     function handleError() {
@@ -55,5 +52,14 @@ export function loadGooglePlacesLibrary(apiKey) {
     }
   })
 
-  return googlePlacesPromise
+  return googleMapsScriptPromise
+}
+
+export async function loadGoogleMapsLibrary(library, apiKey) {
+  await ensureGoogleMapsScript(apiKey)
+  return window.google.maps.importLibrary(library)
+}
+
+export function loadGooglePlacesLibrary(apiKey) {
+  return loadGoogleMapsLibrary('places', apiKey)
 }
